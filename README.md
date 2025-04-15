@@ -48,7 +48,9 @@ This system offers a smart and convenient way for pet owners to:
 
 ## 📷 Prototype Setup
 
-> *(Add actual pictures or diagrams if available)*
+![Prototype Setup](images/photo1.jpg)
+![Prototype Setup](images/photo2.jpg)
+![Prototype Setup](images/photo3.jpg)
 
 - Bottle with a custom lid
 - Motor attached to a plastic plate acting as a feeder gate
