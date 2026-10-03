@@ -1,161 +1,202 @@
-#
-# Date : 20/12/2024
-#
-# Assignment : IoT Assignment (CSM3313)
-# Group 18
-# Name : 1.MUHAMMAD AFIQ FAHMIE BIN AMRI (S67158)
-#        2.TUAN MOHAMAD FIRDAUS BIN TUAN ROSDI (S65650)
-#        3.AMMAR SYARIFUDDIN BIN MOHD ZUKRI (S66115)
-#
-# Project Name : MySmart Feeder
-# Description : A project where we can feed the cat by using the telegram bot in our phone.
-#
-# Telegram Bot Link : https://t.me/MySmartFeederBot
-#
-# This is the code for communication to the Favoriot MQTT broker and the telegram bot. The process were ,
-# 1. The telegram bot will connect to the MQTT broker and listen for food level updates from the Favoriot device.
-# 2. The telegram bot will respond to commands such as /start, /feed, and /foodlevel.
-# 3. The telegram bot will publish commands to the MQTT broker to control the motor and check the food level.
-# 4. The telegram bot will display messages and photos based on the food level status.
-# 5. The telegram bot will send messages to the user via Telegram.
-# 6. The telegram bot will send photos to the user via Telegram.
-# The system act as a bridge between the MQTT broker and the telegram bot or can called as local server.
+"""
+MySmart Feeder Telegram/MQTT bridge.
 
+Configuration is loaded from environment variables so credentials are never
+stored in source control. Copy .env.example to .env and provide your own
+values before running the application.
+"""
 
+import asyncio
+import logging
+import os
+from pathlib import Path
 
-import time
-
-#Import MQTT library
 import paho.mqtt.client as mqtt
-
-#Import telegram library to create a bot and handle commands
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Favoriot MQTT Configuration
-MQTT_BROKER = "mqtt.favoriot.com"
-MQTT_USER = "afQI0FOKCBEvmdgGfDb2JqC6UnNOc6GM"
-MQTT_PASS = "afQI0FOKCBEvmdgGfDb2JqC6UnNOc6GM"
-DEVICE_ID = "ESP32@afiqamri03"
+load_dotenv()
 
-# Will pass the data using this endpoint
-TOPIC = f"{MQTT_USER}/v2/streams"
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
-food_level = None  # To store the food level
+MQTT_BROKER = os.getenv("FAVORIOT_MQTT_BROKER", "mqtt.favoriot.com")
+MQTT_PORT = int(os.getenv("FAVORIOT_MQTT_PORT", "1883"))
+MQTT_USER = os.getenv("FAVORIOT_MQTT_USER")
+MQTT_PASS = os.getenv("FAVORIOT_MQTT_PASS")
+DEVICE_ID = os.getenv("FAVORIOT_DEVICE_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# MQTT message callback to receive food level and display to the user via telegram bot.
-def mqtt_callback(client, userdata, message):
+PICTURES_DIR = Path(__file__).resolve().parent / "pictures"
+food_level = None
+
+
+def validate_configuration() -> None:
+    """Fail early when required runtime configuration is missing."""
+    required = {
+        "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
+        "FAVORIOT_MQTT_USER": MQTT_USER,
+        "FAVORIOT_MQTT_PASS": MQTT_PASS,
+        "FAVORIOT_DEVICE_ID": DEVICE_ID,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variable(s): " + ", ".join(missing)
+        )
+
+
+def mqtt_topic() -> str:
+    return f"{MQTT_USER}/v2/streams"
+
+
+def mqtt_callback(client, userdata, message) -> None:
+    """Receive food-level updates from Favoriot."""
+    del client, userdata
     global food_level
-    print(f"Received message on topic {message.topic}: {message.payload}")
-    if b'"food_level"' in message.payload:
-        try:
-            # Extract food level from payload
-            payload_str = message.payload.decode("utf-8")
-            food_level = payload_str.split('"food_level":')[1].split("}")[0]
-            print(f"Food level updated: {food_level} cm")
-        except Exception as e:
-            print(f"Error processing food level: {e}")
 
-# Function to publish messages to MQTT Server or Favoriot Datastreams
-def publish_mqtt(command):
+    logger.info("Received MQTT message on topic %s", message.topic)
+
+    if b'"food_level"' not in message.payload:
+        return
+
+    try:
+        payload_str = message.payload.decode("utf-8")
+        parsed = payload_str.split('"food_level":', 1)[1].split("}", 1)[0]
+        food_level = parsed.strip().strip('", ')
+        logger.info("Food level updated: %s cm", food_level)
+    except (UnicodeDecodeError, IndexError, ValueError) as exc:
+        logger.warning("Unable to parse food-level payload: %s", exc)
+
+
+def publish_mqtt(command: str) -> bool:
+    """Publish a feeder command to Favoriot."""
     try:
         client = mqtt.Client()
         client.username_pw_set(MQTT_USER, MQTT_PASS)
-        client.connect(MQTT_BROKER, 1883, 60)
-        payload = f'{{"device_developer_id": "{DEVICE_ID}", "data": {{"command": "{command}"}}}}'
-        client.publish(TOPIC, payload)
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+
+        payload = (
+            f'{{"device_developer_id": "{DEVICE_ID}", '
+            f'"data": {{"command": "{command}"}}}}'
+        )
+        client.publish(mqtt_topic(), payload)
         client.disconnect()
         return True
-    except Exception as e:
-        print(f"Error publishing to MQTT: {e}")
+    except Exception:
+        logger.exception("Failed to publish MQTT command: %s", command)
         return False
 
-# Telegram bot command handlers
-# Command to start the bot
+
+async def send_photo(update: Update, filename: str) -> None:
+    if update.message is None:
+        return
+
+    image_path = PICTURES_DIR / filename
+    if not image_path.exists():
+        logger.warning("Image not found: %s", image_path)
+        return
+
+    with image_path.open("rb") as photo:
+        await update.message.reply_photo(photo)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    
-    # Send welcome message for User
-    await update.message.reply_text("Welcome to MySmart Feeder! Use /feed to feed your cats. Use /foodlevel to check the food level.")
-    await update.message.reply_photo(open("pictures/cat.png", "rb"))
+    del context
+    if update.message is None:
+        return
 
-# Command to feed the cat
+    await update.message.reply_text(
+        "Welcome to MySmart Feeder! Use /feed to feed your cat or "
+        "/foodlevel to check the current food level."
+    )
+    await send_photo(update, "cat.png")
+
+
 async def feed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    
-    # Send message to Favoriot when user clicks /feed on the bot
+    del context
+    if update.message is None:
+        return
+
     if publish_mqtt("activate_motor"):
-        # Send message to user if the command is successfully sent
-        await update.message.reply_text("Feeds your cat is successful!")
-        await update.message.reply_photo(open("pictures/thankyouCat.png", "rb"))
+        await update.message.reply_text("Feeding command sent successfully.")
+        await send_photo(update, "thankyouCat.png")
     else:
-        # Send message to user if the command is not successfully sent
-        await update.message.reply_text("Failed to send command to Favoriot.")
+        await update.message.reply_text(
+            "Unable to send the feeding command. Please try again later."
+        )
 
-# Command to check the food level
+
 async def foodlevel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
     global food_level
-    # Send message to Favoriot when user clicks /foodlevel on the bot
-    if publish_mqtt("check_food_level"):
-        # Send message to user if the command is successfully sent and begin to check the food level
-        await update.message.reply_text("Checking food level... Please wait a moment.")
-        # Allow some time for MQTT to process and update the food level
-        time.sleep(3)
-        # Check if the food level is available
-        if food_level is not None:
-            # Tell if the food level is low or else
-            #1st condition : Food level is full or enough..
-            if  float(food_level) < 8:
-                # Send message to user if the food level is full and enough
-                await update.message.reply_text("Food is enough for your cat for couple of days! Feed your cat now ! Use /feed . ")
-                await update.message.reply_text(f"The current food level is {food_level} cm.")
-                await update.message.reply_photo(open("pictures/cat_tq.png", "rb"))
-                return
 
-            #2nd condition : Give warning which food level is almost out..
-            if  8 <= float(food_level) < 12:
-                # Send message to user if the food level is almost out
-                await update.message.reply_text("Food is almost out for your cat! You better feed now! Use /feed to feed your cats now!.")
-                await update.message.reply_text(f"The current food level is {food_level} cm.")
-                await update.message.reply_photo(open("pictures/cat_middle.png", "rb"))
-                
-            #3nd condition : Warning , food level is very loww
-            if  float(food_level) >= 12:
-                # Send message to user if the food level is very low
-                await update.message.reply_text("Food is very low for your cat! You better feed now! Use /feed to feed your cats now!")
-                await update.message.reply_text(f"The current food level is {food_level} cm.")
-                await update.message.reply_photo(open("pictures/cat_angry.png", "rb"))
-        # If the food level is not available
-        else:
-            await update.message.reply_text("Unable to retrieve the food level. Please try again later.")
-    # Send message to user if the command is not successfully sent
+    if update.message is None:
+        return
+
+    if not publish_mqtt("check_food_level"):
+        await update.message.reply_text(
+            "Unable to request the food level. Please try again later."
+        )
+        return
+
+    await update.message.reply_text("Checking food level...")
+    await asyncio.sleep(3)
+
+    if food_level is None:
+        await update.message.reply_text(
+            "Unable to retrieve the food level. Please try again later."
+        )
+        return
+
+    try:
+        level = float(food_level)
+    except ValueError:
+        logger.warning("Invalid food-level value received: %s", food_level)
+        await update.message.reply_text("Received an invalid food-level reading.")
+        return
+
+    await update.message.reply_text(f"The current food level is {level:g} cm.")
+
+    if level < 8:
+        await update.message.reply_text(
+            "Food level is sufficient. You can use /feed when needed."
+        )
+        await send_photo(update, "cat_tq.png")
+    elif level < 12:
+        await update.message.reply_text(
+            "Food is running low. Consider refilling the feeder soon."
+        )
+        await send_photo(update, "cat_middle.png")
     else:
-        await update.message.reply_text("Failed to send command to Favoriot.")
+        await update.message.reply_text(
+            "Food level is very low. Please refill the feeder."
+        )
+        await send_photo(update, "cat_angry.png")
 
-# Main function to run the bot
-def main():
-    # Telegram bot token
-    application = ApplicationBuilder().token("7754717211:AAH-gc_6JKQXsxxPGZPrpuxGPCq0siCnGmc").build()
 
-    # Add command handlers to the bot
+def main() -> None:
+    validate_configuration()
+
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("feed", feed))
     application.add_handler(CommandHandler("foodlevel", foodlevel))
 
-    # Set up MQTT client for the bot to listen for messages
     mqtt_client = mqtt.Client()
     mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
-    mqtt_client.connect(MQTT_BROKER, 1883, 60)
-
-    # Configure MQTT callback
     mqtt_client.on_message = mqtt_callback
-    mqtt_client.subscribe(TOPIC)
-    print("Subscribed to topic for food level updates.")
-
-    # Start the bot and MQTT client loop
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqtt_client.subscribe(mqtt_topic())
     mqtt_client.loop_start()
+
+    logger.info("Subscribed to Favoriot stream topic.")
     application.run_polling()
 
-# Run the bot
+
 if __name__ == "__main__":
     main()
-
-
