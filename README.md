@@ -1,66 +1,119 @@
-# 🐾 Smart Feeder – IoT Pet Feeding System
+# Smart Feeder — IoT, AWS & AI Pet Feeding Analytics Platform
 
-Smart Feeder is an Internet of Things (IoT) project developed for an academic assignment, aiming to automate pet feeding using a Telegram bot. It combines the ESP32 microcontroller, an ultrasonic sensor, and a motor mechanism to detect food levels and dispense food on command.
+Smart Feeder is an academic IoT project that evolved from a remote pet-feeding prototype into a broader cloud-connected pet monitoring and analytics concept.
 
-With just a few Telegram commands, you can check if your pet’s food supply is low and activate the feeder remotely!
+The original prototype combines an ESP32-based feeder, ultrasonic food-level sensing, MQTT communication, and a Telegram bot. A later iteration expanded the solution with pet identification, AWS-backed data processing, and generative-AI analysis.
 
-## 📌 Project Overview
+## Solution Overview
 
-This system offers a smart and convenient way for pet owners to:
+The project was designed around four layers:
 
-- **Monitor food levels** via ultrasonic sensor.
-- **Get food status notifications** (Low / Enough) on Telegram.
-- **Feed pets remotely** by triggering a motor using the Telegram bot.
+1. **Edge & IoT** — ESP32 / ESP32-CAM, ultrasonic sensing, and motor control for feeding.
+2. **Application & ML** — Telegram interaction plus Python/FastAPI services and MobileNetV2-based pet identification.
+3. **Cloud Data & Automation** — Amazon S3, AWS Lambda, and Amazon DynamoDB for image storage, feeding logs, aggregation, and analysis workflows.
+4. **AI Insights** — Amazon Bedrock for generated feeding and pet-health summaries based on collected data.
 
-## 🤖 How It Works
+## Architecture
 
-1. **Ultrasonic Sensor** measures the food level in the container.
-2. The system sends a **status update** (e.g., "Low Food", "Food is Enough") to the **Telegram bot**.
-3. User sends a **Telegram command** to:
-   - Check current food status.
-   - Dispense food if needed.
-4. When the **"Feed" command** is received, a **motor** rotates to open the bottle cap (via a small plastic plate), allowing food to drop for the pet.
-5. The cap closes automatically after feeding.
+```mermaid
+flowchart LR
+    U[Pet Owner / Telegram] --> C[Control & Application Layer]
+    C --> E[ESP32 / ESP32-CAM]
+    E --> S[Ultrasonic Sensor & Feeder Motor]
 
-## 🧠 Features
+    E --> M[FastAPI + MobileNetV2]
+    M <--> S3[Amazon S3\nRegistered Pet Images]
 
-- 🐱 Remote feeding control using Telegram bot
-- 📏 Real-time food level monitoring using an ultrasonic sensor
-- ⚙️ Motor-based feeding mechanism
-- 🔒 ESP32-based control logic for IoT integration
-- 📲 Simple and intuitive Telegram commands
+    C --> L[AWS Lambda]
+    M --> L
+    L <--> D[Amazon DynamoDB\nFeeding Logs / Daily Stats / Registered Pets]
+    D --> B[Amazon Bedrock]
+    B --> C
+```
 
-## 🛠️ Components Used
+> The diagram represents the expanded solution architecture. This public repository currently contains the original IoT/Telegram implementation and project media; not every later cloud-side component is published here.
 
-- ESP32 microcontroller  
-- Ultrasonic sensor (HC-SR04)  
-- Servo or DC motor  
-- Plastic bottle & plate (as feeder prototype)  
-- Telegram Bot API  
-- Jumper wires, power source
+## Core Capabilities
 
-## 💬 Example Telegram Commands
+- Remote feeding through Telegram commands.
+- Food-level monitoring using an ultrasonic sensor.
+- MQTT-based communication between the application layer and IoT device.
+- Camera-assisted pet identification using MobileNetV2.
+- Registered-pet image storage using Amazon S3.
+- Feeding-event and pet-data persistence using Amazon DynamoDB.
+- Serverless processing and aggregation using AWS Lambda.
+- AI-assisted weekly health summaries and monthly feeding forecasts using Amazon Bedrock.
 
-/status → Check current food level
-/feed → Dispense food (activates motor)
-/help → List all commands
+## AWS Components
 
+| Service | Role in the solution |
+| --- | --- |
+| **Amazon S3** | Stores registered pet image datasets used for recognition workflows. |
+| **AWS Lambda** | Handles serverless feeding-log, aggregation, analysis, and health-processing workflows. |
+| **Amazon DynamoDB** | Stores feeding logs, daily statistics, and registered-pet records. |
+| **Amazon Bedrock** | Generates higher-level pet feeding and health insights from collected data. |
 
-## 📷 Prototype Setup
+Example DynamoDB entities used in the expanded design include:
 
-![Prototype Setup](images/photo1.jpg)
-![Prototype Setup](images/photo2.jpg)
-![Prototype Setup](images/photo3.jpg)
+- `PetFeedingLogs`
+- `FeedDailyStats`
+- `RegisteredCats`
 
-- Bottle with a custom lid
-- Motor attached to a plastic plate acting as a feeder gate
-- Sensor positioned to measure remaining food in the bottle
+## Original IoT Prototype
 
-## 📦 Future Improvements
+The initial version in this repository focuses on the physical feeder and Telegram-based remote control:
 
-- Add real-time camera to monitor the pet.
-- Enable automatic feeding based on schedule.
-- Use load cell sensor for more accurate food quantity detection.
+1. The ultrasonic sensor measures the current food level.
+2. The ESP32 communicates device data through MQTT.
+3. The Telegram bot accepts commands such as feeding and food-level checks.
+4. A motor/servo mechanism opens the feeder gate when a feed command is received.
+5. Status information is returned to the user through Telegram.
 
-Youtube Demo Link : https://youtube.com/shorts/hGeAxjq1AQM?si=ipbRWuIuf760F5Rg
+### Main Hardware
 
+- ESP32
+- Ultrasonic sensor
+- Servo / motor feeding mechanism
+- Prototype food container
+- ESP32-CAM in the expanded iteration
+
+## Technology Stack
+
+**Cloud:** AWS Lambda, Amazon DynamoDB, Amazon S3, Amazon Bedrock  
+**AI / ML:** Python, MobileNetV2  
+**Application / API:** Python, FastAPI, Telegram Bot API  
+**IoT:** ESP32, ESP32-CAM, MQTT, ultrasonic sensor, motor/servo control
+
+## Project Ownership
+
+I defined the project concept, functional requirements, solution architecture, data flow, integration approach, and expected user experience. AI-assisted development tools were used during parts of the implementation to accelerate coding, while I remained responsible for the solution decisions, integration, debugging, validation, and overall project direction.
+
+## Recognition
+
+**Top 3 / Bronze — UniSZA MPI**
+
+## Repository Scope
+
+This repository preserves the original academic IoT prototype and its demo assets. The AWS/AI architecture documented above represents the later evolution of the project. Some cloud-side implementation components are not currently included in this public repository.
+
+## Security
+
+Runtime credentials should be supplied through environment variables and must not be committed to source control.
+
+Required variables for the Telegram/MQTT prototype:
+
+```bash
+TELEGRAM_BOT_TOKEN=
+FAVORIOT_MQTT_USER=
+FAVORIOT_MQTT_PASS=
+FAVORIOT_DEVICE_ID=
+```
+
+## Demo
+
+Original prototype demo:  
+https://youtube.com/shorts/hGeAxjq1AQM?si=ipbRWuIuf760F5Rg
+
+---
+
+Developed as part of my Software Engineering studies at Universiti Malaysia Terengganu (UMT).
